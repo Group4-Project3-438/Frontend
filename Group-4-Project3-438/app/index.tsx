@@ -10,6 +10,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { Stack, useRouter } from "expo-router";
 
 type ApiKey = "scryfall" | "pokemon" | "riftcodex";
 
@@ -35,11 +36,9 @@ function getPlaceholder(api: ApiKey) {
   if (api === "pokemon") {
     return "e.g. charizard, pikachu, mewtwo";
   }
-
   if (api === "riftcodex") {
     return "e.g. master yi, jinx, token";
   }
-
   return "e.g. lightning bolt, t:dragon, c:red";
 }
 
@@ -62,6 +61,7 @@ async function fetchRiftCodexJson(url: string) {
 
 export default function Index() {
   const { width: screenWidth } = useWindowDimensions();
+  const router = useRouter();
   const [api, setApi] = useState<ApiKey>("scryfall");
   const [query, setQuery] = useState("");
   const [cards, setCards] = useState<CardItem[]>([]);
@@ -95,7 +95,7 @@ export default function Index() {
 
       if (api === "scryfall") {
         const res = await fetch(
-          `https://api.scryfall.com/cards/search?q=${encodeURIComponent(q)}`,
+          `https://api.scryfall.com/cards/search?q=${encodeURIComponent(q)}`
         );
 
         if (res.status === 404) {
@@ -110,17 +110,19 @@ export default function Index() {
             subtitle: c.type_line,
             detail: c.set_name,
             image:
-              c.image_uris?.normal ?? c.card_faces?.[0]?.image_uris?.normal ?? null,
+              c.image_uris?.normal ??
+              c.card_faces?.[0]?.image_uris?.normal ??
+              null,
             price: c.prices?.usd
               ? `$${c.prices.usd}`
               : c.prices?.usd_foil
-                ? `$${c.prices.usd_foil} (foil)`
-                : null,
+              ? `$${c.prices.usd_foil} (foil)`
+              : null,
           }));
         }
       } else if (api === "pokemon") {
         const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(
-          `name:"*${q}*"`,
+          `name:"*${q}*"`
         )}&pageSize=${MAX_RESULTS}`;
         const res = await fetch(url);
         if (!res.ok) throw new Error(`Pokemon TCG returned ${res.status}`);
@@ -145,7 +147,10 @@ export default function Index() {
             }
           }
 
-          const subtitleParts = [c.supertype, ...(c.subtypes ?? [])].filter(Boolean);
+          const subtitleParts = [
+            c.supertype,
+            ...(c.subtypes ?? []),
+          ].filter(Boolean);
 
           return {
             id: c.id,
@@ -158,7 +163,7 @@ export default function Index() {
         });
       } else {
         const url = `https://api.riftcodex.com/cards/name?fuzzy=${encodeURIComponent(
-          q,
+          q
         )}&size=${MAX_RESULTS}&sort=name&dir=1`;
         const data = await fetchRiftCodexJson(url);
         nextCards = (data.items ?? []).map((c: any) => ({
@@ -168,7 +173,9 @@ export default function Index() {
             .filter(Boolean)
             .join(" · "),
           detail: c.set?.label
-            ? `${c.set.label}${c.riftbound_id ? ` · ${c.riftbound_id}` : ""}`
+            ? `${c.set.label}${
+                c.riftbound_id ? ` · ${c.riftbound_id}` : ""
+              }`
             : c.riftbound_id,
           image: c.media?.image_url ?? null,
           price: null,
@@ -184,80 +191,115 @@ export default function Index() {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Card Search</Text>
-
-      <View style={styles.apiRow}>
-        {API_OPTIONS.map((opt) => {
-          const active = opt.key === api;
-          return (
+    <>
+      <Stack.Screen
+        options={{
+          headerRight: () => (
             <Pressable
-              key={opt.key}
-              onPress={() => setApi(opt.key)}
-              style={[styles.apiChip, active && styles.apiChipActive]}
+              onPress={() => {
+                router.push("/profile");
+              }}
+              style={{ marginRight: 15 }}
             >
-              <Text style={[styles.apiChipText, active && styles.apiChipTextActive]}>
-                {opt.label}
-              </Text>
+              <Text style={{ fontWeight: "bold" }}>Profile</Text>
             </Pressable>
-          );
-        })}
-      </View>
-
-      <TextInput
-        value={query}
-        onChangeText={setQuery}
-        placeholder={placeholder}
-        placeholderTextColor="#9a948a"
-        style={styles.input}
-        onSubmitEditing={handleSearch}
-        editable={!loading}
+          ),
+        }}
       />
+      <ScrollView contentContainerStyle={styles.container}>
+        <Text style={styles.title}>Card Search</Text>
 
-      <Pressable
-        onPress={handleSearch}
-        disabled={loading || !query.trim()}
-        style={[
-          styles.button,
-          (loading || !query.trim()) && styles.buttonDisabled,
-        ]}
-      >
-        {loading ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Search</Text>
-        )}
-      </Pressable>
+        <View style={styles.apiRow}>
+          {API_OPTIONS.map((opt) => {
+            const active = opt.key === api;
+            return (
+              <Pressable
+                key={opt.key}
+                onPress={() => setApi(opt.key)}
+                style={[styles.apiChip, active && styles.apiChipActive]}
+              >
+                <Text
+                  style={[
+                    styles.apiChipText,
+                    active && styles.apiChipTextActive,
+                  ]}
+                >
+                  {opt.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
 
-      {!!error && <Text style={styles.error}>{error}</Text>}
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder={placeholder}
+          placeholderTextColor="#9a948a"
+          style={styles.input}
+          onSubmitEditing={handleSearch}
+          editable={!loading}
+        />
 
-      {!loading && !error && searchedQuery.length > 0 && cards.length === 0 && (
-        <Text style={styles.empty}>No cards found for {searchedQuery}</Text>
-      )}
+        <Pressable
+          onPress={handleSearch}
+          disabled={loading || !query.trim()}
+          style={[
+            styles.button,
+            (loading || !query.trim()) && styles.buttonDisabled,
+          ]}
+        >
+          {loading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Search</Text>
+          )}
+        </Pressable>
 
-      <View style={styles.grid}>
-        {cards.map((card) => (
-          <View key={card.id} style={[styles.card, { width: cardWidth }]}>
-            {card.image ? (
-              <Image source={{ uri: card.image }} style={styles.cardImage} />
-            ) : (
-              <View style={styles.noImage}>
-                <Text style={styles.noImageText}>No image</Text>
+        {!!error && <Text style={styles.error}>{error}</Text>}
+
+        {!loading &&
+          !error &&
+          searchedQuery.length > 0 &&
+          cards.length === 0 && (
+            <Text style={styles.empty}>
+              No cards found for {searchedQuery}
+            </Text>
+          )}
+
+        <View style={styles.grid}>
+          {cards.map((card) => (
+            <View key={card.id} style={[styles.card, { width: cardWidth }]}>
+              {card.image ? (
+                <Image
+                  source={{ uri: card.image }}
+                  style={styles.cardImage}
+                />
+              ) : (
+                <View style={styles.noImage}>
+                  <Text style={styles.noImageText}>No image</Text>
+                </View>
+              )}
+              <View style={styles.cardBody}>
+                <Text style={styles.cardName}>{card.name}</Text>
+                {!!card.subtitle && (
+                  <Text style={styles.cardSub}>{card.subtitle}</Text>
+                )}
+                {!!card.detail && (
+                  <Text style={styles.cardDetail}>{card.detail}</Text>
+                )}
+                <Text selectable style={styles.cardId}>
+                  id: {card.id}
+                </Text>
+                <Text style={styles.cardPrice}>
+                  {card.price || "—"}
+                </Text>
               </View>
-            )}
-            <View style={styles.cardBody}>
-              <Text style={styles.cardName}>{card.name}</Text>
-              {!!card.subtitle && <Text style={styles.cardSub}>{card.subtitle}</Text>}
-              {!!card.detail && <Text style={styles.cardDetail}>{card.detail}</Text>}
-              <Text selectable style={styles.cardId}>
-                id: {card.id}
-              </Text>
-              <Text style={styles.cardPrice}>{card.price || "—"}</Text>
             </View>
-          </View>
-        ))}
-      </View>
-    </ScrollView>
+          ))}
+        </View>
+      </ScrollView>
+    </>
   );
 }
 
