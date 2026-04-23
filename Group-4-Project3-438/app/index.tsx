@@ -1,7 +1,24 @@
-import { Text, View } from "react-native";
+import { Text, View, Pressable } from "react-native";
+import { Stack, useRouter } from "expo-router";
 
 export default function Index() {
-  return (
+  const router = useRouter();
+  return ( <>
+    <Stack.Screen
+      options={{
+        headerRight: () => (
+          <Pressable
+            onPress={() => {
+              router.push("/profile");
+            }}
+            style={{ marginRight: 15 }}
+          >
+            <Text style={{ fontWeight: "bold" }}>Profile</Text>
+          </Pressable>
+        ),
+      }}
+    />
+
     <View
       style={{
         flex: 1,
@@ -9,7 +26,8 @@ export default function Index() {
         alignItems: "center",
       }}
     >
-      <Text>Edit app/index.tsx to edit this screen.</Text>
+      <Text>This is where all the cards will be... eventually!</Text>
     </View>
+  </>
   );
 }
