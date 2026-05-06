@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -10,7 +10,8 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { Stack, useRouter } from "expo-router";
+import { Stack } from "expo-router";
+import { useAuth } from "./auth-context";
 
 type ApiKey = "scryfall" | "pokemon" | "riftcodex";
 
@@ -23,6 +24,12 @@ type CardItem = {
   price?: string | null;
 };
 
+type CardList = {
+  id: number;
+  userId: string;
+  name: string;
+};
+
 const API_OPTIONS: { key: ApiKey; label: string }[] = [
   { key: "scryfall", label: "Magic: The Gathering" },
   { key: "pokemon", label: "Pokemon TCG" },
@@ -31,6 +38,9 @@ const API_OPTIONS: { key: ApiKey; label: string }[] = [
 const MAX_RESULTS = 60;
 const HORIZONTAL_PADDING = 16;
 const GRID_GAP = 8;
+const BACKEND_BASE_URL =
+  process.env.EXPO_PUBLIC_BACKEND_URL?.replace(/\/+$/, "") ??
+  "http://localhost:8082";
 
 function getPlaceholder(api: ApiKey) {
   if (api === "pokemon") {
@@ -59,27 +69,108 @@ async function fetchRiftCodexJson(url: string) {
   }
 }
 
+async function saveFavoriteCard(userId: string, cardId: string) {
+  const response = await fetch(`${BACKEND_BASE_URL}/api/favorites`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ userId, cardId }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Favorite save failed with ${response.status}`);
+  }
+}
+
+async function fetchUserLists(userId: string): Promise<CardList[]> {
+  const encodedUserId = encodeURIComponent(userId);
+  const response = await fetch(`${BACKEND_BASE_URL}/api/lists?userId=${encodedUserId}`);
+
+  if (!response.ok) {
+    throw new Error(`List fetch failed with ${response.status}`);
+  }
+
+  return response.json();
+}
+
+async function addCardToList(userId: string, listId: number, cardId: string) {
+  const response = await fetch(`${BACKEND_BASE_URL}/api/lists/${listId}/cards`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ userId, cardId }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Add to list failed with ${response.status}`);
+  }
+}
+
 export default function Index() {
+  const { user, loading: authLoading } = useAuth();
   const { width: screenWidth } = useWindowDimensions();
-  const router = useRouter();
   const [api, setApi] = useState<ApiKey>("scryfall");
   const [query, setQuery] = useState("");
   const [cards, setCards] = useState<CardItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [searchedQuery, setSearchedQuery] = useState("");
+  const [lists, setLists] = useState<CardList[]>([]);
+  const [listsLoading, setListsLoading] = useState(false);
+  const [savingFavoriteCardIds, setSavingFavoriteCardIds] = useState<Set<string>>(new Set());
+  const [savingListCardIds, setSavingListCardIds] = useState<Set<string>>(new Set());
+  const [expandedListCardId, setExpandedListCardId] = useState<string | null>(null);
+  const [selectedListByCardId, setSelectedListByCardId] = useState<Record<string, number | null>>({});
 
   const placeholder = useMemo(() => getPlaceholder(api), [api]);
   const columnCount = useMemo(() => {
-    if (screenWidth >= 1000) return 7;
-    if (screenWidth >= 760) return 6;
-    if (screenWidth >= 520) return 5;
-    return 4;
+    if (screenWidth >= 1200) return 7;
+    if (screenWidth >= 960) return 6;
+    if (screenWidth >= 760) return 5;
+    if (screenWidth >= 600) return 4;
+    if (screenWidth >= 420) return 3;
+    return 2;
   }, [screenWidth]);
   const cardWidth = useMemo(() => {
     const available = screenWidth - HORIZONTAL_PADDING * 2;
     return (available - GRID_GAP * (columnCount - 1)) / columnCount;
   }, [columnCount, screenWidth]);
+  const normalizedUserId = user?.userId?.trim() ?? "";
+  const isAuthenticated = !!user?.authenticated;
+
+  useEffect(() => {
+    if (!normalizedUserId) {
+      setLists([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadLists() {
+      setListsLoading(true);
+      try {
+        const nextLists = await fetchUserLists(normalizedUserId);
+        if (!cancelled) {
+          setLists(nextLists);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Could not load lists");
+        }
+      } finally {
+        if (!cancelled) {
+          setListsLoading(false);
+        }
+      }
+    }
+
+    loadLists();
+    return () => {
+      cancelled = true;
+    };
+  }, [normalizedUserId]);
 
   async function handleSearch() {
     const q = query.trim();
@@ -190,24 +281,60 @@ export default function Index() {
     }
   }
 
+  async function handleAddFavorite(cardId: string) {
+    if (!normalizedUserId || savingFavoriteCardIds.has(cardId)) return;
+
+    setSavingFavoriteCardIds((prev) => new Set(prev).add(cardId));
+    setError("");
+    try {
+      await saveFavoriteCard(normalizedUserId, cardId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save favorite");
+    } finally {
+      setSavingFavoriteCardIds((prev) => {
+        const next = new Set(prev);
+        next.delete(cardId);
+        return next;
+      });
+    }
+  }
+
+  async function handleAddCardToSelectedList(cardId: string) {
+    const selectedListId = selectedListByCardId[cardId];
+    if (!normalizedUserId || !selectedListId || savingListCardIds.has(cardId)) return;
+
+    setSavingListCardIds((prev) => new Set(prev).add(cardId));
+    setError("");
+    try {
+      await addCardToList(normalizedUserId, selectedListId, cardId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add card to list");
+    } finally {
+      setSavingListCardIds((prev) => {
+        const next = new Set(prev);
+        next.delete(cardId);
+        return next;
+      });
+    }
+  }
+
+  function getSelectedListName(cardId: string) {
+    const selectedListId = selectedListByCardId[cardId];
+    if (!selectedListId) return "Choose list";
+
+    const selected = lists.find((list) => list.id === selectedListId);
+    return selected?.name ?? "Choose list";
+  }
+
   return (
     <>
       <Stack.Screen
         options={{
-          headerRight: () => (
-            <Pressable
-              onPress={() => {
-                router.push("/profile");
-              }}
-              style={{ marginRight: 15 }}
-            >
-              <Text style={{ fontWeight: "bold" }}>Profile</Text>
-            </Pressable>
-          ),
+          title: "CardFetcher",
         }}
       />
       <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>Card Search</Text>
+        <Text style={styles.title}>CardFetcher</Text>
 
         <View style={styles.apiRow}>
           {API_OPTIONS.map((opt) => {
@@ -230,6 +357,22 @@ export default function Index() {
             );
           })}
         </View>
+
+        <Text style={styles.listMeta}>
+          {authLoading
+            ? "Checking signed-in user..."
+            : listsLoading
+            ? "Loading your lists..."
+            : `${lists.length} list${lists.length === 1 ? "" : "s"} loaded`}
+        </Text>
+        {!authLoading && !isAuthenticated && (
+          <Text style={styles.warningText}>Sign in from Profile to favorite cards and use lists.</Text>
+        )}
+        {!authLoading && isAuthenticated && !normalizedUserId && (
+          <Text style={styles.warningText}>
+            Signed in, but no usable user id was returned by OAuth.
+          </Text>
+        )}
 
         <TextInput
           value={query}
@@ -288,12 +431,80 @@ export default function Index() {
                 {!!card.detail && (
                   <Text style={styles.cardDetail}>{card.detail}</Text>
                 )}
-                <Text selectable style={styles.cardId}>
-                  id: {card.id}
-                </Text>
                 <Text style={styles.cardPrice}>
                   {card.price || "—"}
                 </Text>
+                <View style={styles.cardActionRow}>
+                  <Pressable
+                    onPress={() => handleAddFavorite(card.id)}
+                    disabled={savingFavoriteCardIds.has(card.id) || !normalizedUserId}
+                    style={[
+                      styles.favoriteButton,
+                      (savingFavoriteCardIds.has(card.id) || !normalizedUserId) &&
+                        styles.favoriteButtonDisabled,
+                    ]}
+                  >
+                    <Text style={styles.favoriteButtonText}>
+                      {savingFavoriteCardIds.has(card.id) ? "Saving..." : "Favorite"}
+                    </Text>
+                  </Pressable>
+                </View>
+
+                <Pressable
+                  onPress={() =>
+                    setExpandedListCardId((prev) => (prev === card.id ? null : card.id))
+                  }
+                  style={styles.listDropdown}
+                >
+                  <Text style={styles.listDropdownText}>{getSelectedListName(card.id)}</Text>
+                </Pressable>
+
+                {expandedListCardId === card.id && (
+                  <View style={styles.listDropdownMenu}>
+                    {lists.length === 0 ? (
+                      <Text style={styles.listEmptyText}>No lists found</Text>
+                    ) : (
+                      lists.map((list) => {
+                        const isSelected = selectedListByCardId[card.id] === list.id;
+                        return (
+                          <Pressable
+                            key={list.id}
+                            onPress={() => {
+                              setSelectedListByCardId((prev) => ({
+                                ...prev,
+                                [card.id]: list.id,
+                              }));
+                              setExpandedListCardId(null);
+                            }}
+                            style={[styles.listOption, isSelected && styles.listOptionSelected]}
+                          >
+                            <Text style={styles.listOptionText}>{list.name}</Text>
+                          </Pressable>
+                        );
+                      })
+                    )}
+                  </View>
+                )}
+
+                <Pressable
+                  onPress={() => handleAddCardToSelectedList(card.id)}
+                  disabled={
+                    !normalizedUserId ||
+                    !selectedListByCardId[card.id] ||
+                    savingListCardIds.has(card.id)
+                  }
+                  style={[
+                    styles.addToListButton,
+                    (!normalizedUserId ||
+                      !selectedListByCardId[card.id] ||
+                      savingListCardIds.has(card.id)) &&
+                      styles.addToListButtonDisabled,
+                  ]}
+                >
+                  <Text style={styles.addToListButtonText}>
+                    {savingListCardIds.has(card.id) ? "Adding..." : "Add to list"}
+                  </Text>
+                </Pressable>
               </View>
             </View>
           ))}
@@ -310,6 +521,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: HORIZONTAL_PADDING,
     paddingTop: 20,
     paddingBottom: 16,
+  },
+  listMeta: {
+    color: "#999",
+    marginBottom: 8,
+    fontSize: 11,
+  },
+  warningText: {
+    color: "#f3bc66",
+    marginBottom: 8,
+    fontSize: 11,
   },
   title: {
     color: "#fff",
@@ -378,7 +599,7 @@ const styles = StyleSheet.create({
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    justifyContent: "space-between",
+    justifyContent: "flex-start",
     gap: GRID_GAP,
   },
   card: {
@@ -421,15 +642,83 @@ const styles = StyleSheet.create({
     color: "#999",
     fontSize: 9,
   },
-  cardId: {
-    color: "#8a8a8a",
-    marginTop: 2,
-    fontSize: 8,
-  },
   cardPrice: {
     color: "#86d28f",
     fontWeight: "700",
     marginTop: 4,
     fontSize: 11,
+  },
+  cardActionRow: {
+    marginTop: 8,
+    flexDirection: "row",
+  },
+  favoriteButton: {
+    alignSelf: "flex-start",
+    borderRadius: 6,
+    backgroundColor: "#2f6df5",
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  favoriteButtonDisabled: {
+    opacity: 0.6,
+  },
+  favoriteButtonText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  listDropdown: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: "#444",
+    borderRadius: 6,
+    backgroundColor: "#222",
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+  listDropdownText: {
+    color: "#ddd",
+    fontSize: 11,
+  },
+  listDropdownMenu: {
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: "#444",
+    borderRadius: 6,
+    backgroundColor: "#222",
+    overflow: "hidden",
+  },
+  listOption: {
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+  listOptionSelected: {
+    backgroundColor: "#2f6df5",
+  },
+  listOptionText: {
+    color: "#fff",
+    fontSize: 11,
+  },
+  listEmptyText: {
+    color: "#999",
+    fontSize: 11,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+  addToListButton: {
+    marginTop: 8,
+    alignSelf: "flex-start",
+    borderRadius: 6,
+    backgroundColor: "#1f8f4a",
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  addToListButtonDisabled: {
+    opacity: 0.6,
+  },
+  addToListButtonText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700",
   },
 });
