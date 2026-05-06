@@ -40,7 +40,7 @@ const HORIZONTAL_PADDING = 16;
 const GRID_GAP = 8;
 const BACKEND_BASE_URL =
   process.env.EXPO_PUBLIC_BACKEND_URL?.replace(/\/+$/, "") ??
-  "https://backend-api-b6pi.onrender.com";
+  "https://cardfetcherapi.onrender.com";
 
 function getPlaceholder(api: ApiKey) {
   if (api === "pokemon") {

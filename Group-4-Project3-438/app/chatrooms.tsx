@@ -49,7 +49,7 @@ type ListCardDisplay = ListCardItem & {
 
 const BACKEND_BASE_URL =
   process.env.EXPO_PUBLIC_BACKEND_URL?.replace(/\/+$/, "") ??
-  "https://backend-api-b6pi.onrender.com";
+  "https://cardfetcherapi.onrender.com";
 
 async function fetchRooms(): Promise<ChatRoom[]> {
   const response = await fetch(`${BACKEND_BASE_URL}/chat/rooms`, {

@@ -18,7 +18,7 @@ type AuthContextValue = {
 
 const BACKEND_BASE_URL =
   process.env.EXPO_PUBLIC_BACKEND_URL?.replace(/\/+$/, "") ??
-  "https://backend-api-b6pi.onrender.com";
+  "https://cardfetcherapi.onrender.com";
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 

@@ -18,7 +18,7 @@ import { resolveCardById, type ResolvedCard } from "./card-resolver";
 
 const BACKEND_BASE_URL =
   process.env.EXPO_PUBLIC_BACKEND_URL?.replace(/\/+$/, "") ??
-  "https://backend-api-b6pi.onrender.com";
+  "https://cardfetcherapi.onrender.com";
 
 type FavoriteCard = {
   id: number;
