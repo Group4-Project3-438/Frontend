@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -9,8 +9,10 @@ import {
   TextInput,
   useWindowDimensions,
   View,
+  AppState,
 } from "react-native";
 import { Stack, useRouter } from "expo-router";
+import * as WebBrowser from "expo-web-browser";
 
 type ApiKey = "scryfall" | "pokemon" | "riftcodex";
 
@@ -28,25 +30,26 @@ const API_OPTIONS: { key: ApiKey; label: string }[] = [
   { key: "pokemon", label: "Pokemon TCG" },
   { key: "riftcodex", label: "Riftbound" },
 ];
+
 const MAX_RESULTS = 60;
 const HORIZONTAL_PADDING = 16;
 const GRID_GAP = 8;
 
 function getPlaceholder(api: ApiKey) {
-  if (api === "pokemon") {
-    return "e.g. charizard, pikachu, mewtwo";
-  }
-  if (api === "riftcodex") {
-    return "e.g. master yi, jinx, token";
-  }
+  if (api === "pokemon") return "e.g. charizard, pikachu, mewtwo";
+  if (api === "riftcodex") return "e.g. master yi, jinx, token";
   return "e.g. lightning bolt, t:dragon, c:red";
+}
+
+function loginWithGoogle() {
+  WebBrowser.openBrowserAsync(
+    "http://localhost:8081/oauth2/authorization/google"
+  );
 }
 
 async function fetchJson(url: string) {
   const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Request failed with ${res.status}`);
-  }
+  if (!res.ok) throw new Error(`Request failed with ${res.status}`);
   return res.json();
 }
 
@@ -62,6 +65,8 @@ async function fetchRiftCodexJson(url: string) {
 export default function Index() {
   const { width: screenWidth } = useWindowDimensions();
   const router = useRouter();
+
+  const [user, setUser] = useState<any>(null);
   const [api, setApi] = useState<ApiKey>("scryfall");
   const [query, setQuery] = useState("");
   const [cards, setCards] = useState<CardItem[]>([]);
@@ -70,16 +75,46 @@ export default function Index() {
   const [searchedQuery, setSearchedQuery] = useState("");
 
   const placeholder = useMemo(() => getPlaceholder(api), [api]);
+
   const columnCount = useMemo(() => {
     if (screenWidth >= 1000) return 7;
     if (screenWidth >= 760) return 6;
     if (screenWidth >= 520) return 5;
     return 4;
   }, [screenWidth]);
+
   const cardWidth = useMemo(() => {
     const available = screenWidth - HORIZONTAL_PADDING * 2;
     return (available - GRID_GAP * (columnCount - 1)) / columnCount;
   }, [columnCount, screenWidth]);
+
+  const checkAuth = () => {
+    fetch("http://localhost:8081/api/auth/me", {
+      credentials: "include",
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.authenticated) {
+          setUser(data);
+        } else {
+          setUser(null);
+        }
+      })
+      .catch(() => setUser(null));
+  };
+
+  useEffect(() => {
+    checkAuth();
+  }, []);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        checkAuth();
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   async function handleSearch() {
     const q = query.trim();
@@ -124,10 +159,12 @@ export default function Index() {
         const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(
           `name:"*${q}*"`
         )}&pageSize=${MAX_RESULTS}`;
+
         const res = await fetch(url);
         if (!res.ok) throw new Error(`Pokemon TCG returned ${res.status}`);
 
         const data = await res.json();
+
         nextCards = (data.data ?? []).map((c: any) => {
           const tcgPrices = c.tcgplayer?.prices;
           let price: string | null = null;
@@ -165,7 +202,9 @@ export default function Index() {
         const url = `https://api.riftcodex.com/cards/name?fuzzy=${encodeURIComponent(
           q
         )}&size=${MAX_RESULTS}&sort=name&dir=1`;
+
         const data = await fetchRiftCodexJson(url);
+
         nextCards = (data.items ?? []).map((c: any) => ({
           id: c.id,
           name: c.name,
@@ -194,18 +233,27 @@ export default function Index() {
     <>
       <Stack.Screen
         options={{
-          headerRight: () => (
-            <Pressable
-              onPress={() => {
-                router.push("/profile");
-              }}
-              style={{ marginRight: 15 }}
-            >
-              <Text style={{ fontWeight: "bold" }}>Profile</Text>
-            </Pressable>
-          ),
+          headerRight: () =>
+            user ? (
+              <Pressable
+                onPress={() => router.push("/profile")}
+                style={{ marginRight: 15 }}
+              >
+                <Text style={{ fontWeight: "bold" }}>
+                  {user.name || "Profile"}
+                </Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={loginWithGoogle}
+                style={{ marginRight: 15 }}
+              >
+                <Text style={{ fontWeight: "bold" }}>Login</Text>
+              </Pressable>
+            ),
         }}
       />
+
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={styles.title}>Card Search</Text>
 
