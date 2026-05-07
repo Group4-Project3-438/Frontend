@@ -1,4 +1,4 @@
-export type CardSource = "scryfall" | "pokemon" | "riftcodex" | null;
+export type CardSource = "scryfall" | "pokemon" | "riftcodex" | "digimon" | null;
 
 export type ResolvedCard = {
   image: string | null;
@@ -54,6 +54,20 @@ export async function resolveCardById(cardIdRaw: string): Promise<ResolvedCard> 
       image: payload?.images?.large ?? payload?.images?.small ?? null,
       name: typeof payload?.name === "string" ? payload.name : null,
       source: "pokemon",
+    };
+  } catch {
+    // Try next source
+  }
+
+  try {
+    const digimon = await fetchJson(
+      `https://digimoncard.io/api-public/search.php?card=${encodeURIComponent(cardId)}`
+    );
+    const payload = Array.isArray(digimon)? digimon[0] : null;
+    return {
+      image: payload?.image_url ?? payload?.image ?? null,
+      name: typeof payload?.name === "string"? payload.name : null,
+      source: 'digimon',
     };
   } catch {
     // Try next source

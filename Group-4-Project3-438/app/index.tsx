@@ -13,7 +13,7 @@ import {
 import { Stack } from "expo-router";
 import { useAuth } from "./auth-context";
 
-type ApiKey = "scryfall" | "pokemon" | "riftcodex";
+type ApiKey = "scryfall" | "pokemon" | "riftcodex" | "digimon";
 
 type CardItem = {
   id: string;
@@ -34,6 +34,7 @@ const API_OPTIONS: { key: ApiKey; label: string }[] = [
   { key: "scryfall", label: "Magic: The Gathering" },
   { key: "pokemon", label: "Pokemon TCG" },
   { key: "riftcodex", label: "Riftbound" },
+  { key: "digimon", label: "Digimon TCG" },
 ];
 const MAX_RESULTS = 60;
 const HORIZONTAL_PADDING = 16;
@@ -48,6 +49,9 @@ function getPlaceholder(api: ApiKey) {
   }
   if (api === "riftcodex") {
     return "e.g. master yi, jinx, token";
+  }
+  if (api === "digimon"){
+    return "e.g agumon, kabuterimon, angemon"
   }
   return "e.g. lightning bolt, t:dragon, c:red";
 }
@@ -251,6 +255,42 @@ export default function Index() {
             image: c.images?.large ?? c.images?.small ?? null,
             price,
           };
+        });
+      } else if (api === "digimon") {
+        const url = `https://digimoncard.io/api-public/search.php?n=${encodeURIComponent(q)}`;
+        const res = await fetch(url);
+        if (!res.ok) {
+          throw new Error(`Digimon API returned ${res.status}`);
+        }
+        const data = await res.json();
+
+        nextCards = (Array.isArray(data) ? data : []).slice(0, MAX_RESULTS).map((c: any) => {
+        const subtitleParts = [
+          c.type,
+          c.color,
+          c.stage,
+        ].filter(Boolean);
+
+        const detailParts = [
+          c.cardnumber,
+          c.attribute,
+          c.level ? `Lv.${c.level}` : null,
+        ].filter(Boolean);
+
+        return {
+          id:
+            c.id?.toString() ??
+            c.cardnumber ??
+            `${c.name}-${Math.random()}`,
+          name: c.name ?? "Unknown Card",
+          subtitle: subtitleParts.join(" · "),
+          detail: detailParts.join(" · "),
+          image:
+            c.image_url ??
+            c.image ??
+            null,
+          price: null,
+        };
         });
       } else {
         const url = `https://api.riftcodex.com/cards/name?fuzzy=${encodeURIComponent(
